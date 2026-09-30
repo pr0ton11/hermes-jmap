@@ -1,0 +1,6 @@
+[project]
+name = "hermes-jmap"
+version = "0.1.0"
+description = "Native Hermes user plugin for JMAP mail and calendars"
+requires-python = ">=3.11"
+dependencies = []

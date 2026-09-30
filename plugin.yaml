@@ -1,0 +1,47 @@
+name: hermes-jmap
+version: 0.1.0
+description: Personal JMAP email and calendar tools with explicit consequential actions
+kind: standalone
+manifest_version: 2
+requires_env:
+  - name: JMAP_SESSION_URL
+    description: Authenticated JMAP Session URL (HTTPS)
+  - name: JMAP_USERNAME
+    description: JMAP login identity
+  - name: JMAP_SECRET
+    description: JMAP password or bearer token
+    secret: true
+config_schema:
+  auth_type: {type: str, default: basic, choices: [basic, bearer]}
+  mail_account_id: {type: str, description: Optional explicit mail account ID}
+  calendar_account_id: {type: str, description: Optional explicit calendar account ID}
+  timezone: {type: str, default: Europe/Zurich}
+  timeout_seconds: {type: int, default: 20}
+  max_attachment_bytes: {type: int, default: 10485760}
+  trusted_origins: {type: list, default: []}
+  enable_mutations: {type: bool, default: false}
+provides_tools:
+  - jmap_list_mailboxes
+  - jmap_list_email
+  - jmap_search_email
+  - jmap_get_email
+  - jmap_get_thread
+  - jmap_get_attachment
+  - jmap_list_calendars
+  - jmap_get_calendar
+  - jmap_list_events
+  - jmap_search_events
+  - jmap_get_event
+  - jmap_calendar_availability
+  - jmap_create_draft
+  - jmap_update_draft
+  - jmap_move_email
+  - jmap_mark_read
+  - jmap_set_flagged
+  - jmap_send_draft
+  - jmap_delete_email
+  - jmap_create_event
+  - jmap_update_event
+  - jmap_delete_event
+provides_hooks:
+  - pre_tool_call

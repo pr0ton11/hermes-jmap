@@ -1,0 +1,1 @@
+"""Offline JMAP contract tests."""
