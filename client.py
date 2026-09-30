@@ -42,7 +42,7 @@ class Client:
         self._session = None
         self._lock = threading.RLock()
 
-    def _request(self, method, url, payload=None, *, mutation=False, max_bytes=MAX_JSON_BYTES):
+    def _request(self, method, url, payload=None, *, mutation=False, max_bytes=MAX_JSON_BYTES, stage="jmap_api"):
         self.config.authorize_endpoint(url)
         headers = {"Authorization": self.config.authorization(), "Accept": "application/json"}
         body = None
@@ -58,14 +58,24 @@ class Client:
             code = exc.code
             retry_after = exc.headers.get("Retry-After") if exc.headers else None
             exc.close()
+            details = {"http_status": code, "stage": stage}
             if code in (401, 403):
-                raise JMAPError("unauthorized" if code == 401 else "forbidden", "JMAP authentication or authorization failed.") from None
+                raise JMAPError("unauthorized" if code == 401 else "forbidden", "JMAP authentication or authorization failed.", **details) from None
             if code == 429:
                 retry = min(int(retry_after), 3600) if retry_after and retry_after.isdecimal() else None
-                raise JMAPError("rate_limited", "The server rate limited this operation. Retry later.", retry_after=retry) from None
-            raise JMAPError("http_error", "The JMAP HTTP request failed.", outcome_unknown=mutation and code >= 500) from None
+                raise JMAPError("rate_limited", "The server rate limited this operation. Retry later.", retry_after=retry, **details) from None
+            if 300 <= code < 400:
+                raise JMAPError("redirect_refused", "The endpoint returned a redirect. Configure the direct JMAP Session URL; redirects are not followed with credentials.", **details) from None
+            message = "The JMAP HTTP request failed."
+            if code == 404:
+                message = "The JMAP endpoint was not found. Check the Session URL or discovered API route."
+            elif code == 405:
+                message = "The endpoint does not accept this HTTP method. Check the JMAP endpoint and proxy routing."
+            elif code >= 500:
+                message = "The JMAP server or proxy returned an HTTP failure."
+            raise JMAPError("http_error", message, outcome_unknown=mutation and code >= 500, **details) from None
         except (URLError, TimeoutError, socket.timeout, OSError, HTTPException):
-            raise JMAPError("network_error", "The JMAP connection failed. Inspect state before retrying a mutation.", outcome_unknown=mutation) from None
+            raise JMAPError("network_error", "The JMAP connection failed. Inspect state before retrying a mutation.", outcome_unknown=mutation, stage=stage) from None
 
     @staticmethod
     def _decode(data):
@@ -91,7 +101,7 @@ class Client:
     def session(self):
         with self._lock:
             if self._session is None:
-                self._session = Session.parse(self._decode(self._request("GET", self.config.session_url)), self.config)
+                self._session = Session.parse(self._decode(self._request("GET", self.config.session_url, stage="session_discovery")), self.config)
             return self._session
 
     def call(self, method, arguments, capability, *, mutation=False, account_id=None, extra_capabilities=()):
@@ -243,4 +253,4 @@ class Client:
             template = template.replace("{" + key + "}", quote(value, safe=""))
         if "{" in template or "}" in template:
             raise malformed()
-        return self._request("GET", template, max_bytes=self.config.max_attachment_bytes)
+        return self._request("GET", template, max_bytes=self.config.max_attachment_bytes, stage="attachment_download")

@@ -35,6 +35,19 @@ class Context:
 
 
 class HardeningTests(unittest.TestCase):
+    def test_http_failure_identifies_status_and_stage_in_real_tool_results(self):
+        env = {"JMAP_SESSION_URL": "https://mail.example/session", "JMAP_USERNAME": "user", "JMAP_SECRET": "secret"}
+        for name in ("jmap_list_mailboxes", "jmap_list_email"):
+            for stage in ("session_discovery", "jmap_api"):
+                failure = HTTPError("https://mail.example/secret", 404, "secret", {}, io.BytesIO(b"secret response"))
+                transport = Transport(*([session_payload()] if stage == "jmap_api" else []), failure)
+                with self.subTest(name=name, stage=stage), patch.dict(os.environ, env), patch.object(handlers, "Client", side_effect=lambda cfg: Client(cfg, transport)):
+                    result = json.loads(handlers.handler(Context(), name)({}))
+                self.assertEqual(result["code"], "http_error")
+                self.assertEqual(result.get("http_status"), 404)
+                self.assertEqual(result.get("stage"), stage)
+                self.assertNotIn("secret", json.dumps(result))
+
     def test_transport_enforces_declared_and_streamed_size(self):
         for headers in ({"Content-Length": "11"}, {}, {"Content-Length": "bogus"}):
             response = FakeResponse(b"x" * 11, headers)
@@ -50,9 +63,27 @@ class HardeningTests(unittest.TestCase):
     def test_redirects_do_not_forward_authentication(self):
         self.assertIsNone(client_module.NoRedirect().redirect_request(None, None, 302, "redirect", {}, "https://attacker.example"))
         transport = Transport(HTTPError("https://mail.example", 302, "secret", {}, None))
-        with self.assertRaises(JMAPError):
+        with self.assertRaises(JMAPError) as caught:
             Client(Config("https://mail.example", "user", "secret"), transport).session
+        self.assertEqual(caught.exception.as_dict()["http_status"], 302)
+        self.assertEqual(caught.exception.as_dict()["stage"], "session_discovery")
+        self.assertEqual(caught.exception.code, "redirect_refused")
         self.assertEqual(len(transport.calls), 1)
+
+    def test_stalwart_well_known_redirect_explained_and_direct_session_works(self):
+        env = {"JMAP_SESSION_URL": "https://mail.example/.well-known/jmap", "JMAP_USERNAME": "user", "JMAP_SECRET": "secret"}
+        transport = Transport(HTTPError(env["JMAP_SESSION_URL"], 307, "Redirect", {"Location": "/jmap/session"}, None))
+        with patch.dict(os.environ, env), patch.object(handlers, "Client", side_effect=lambda cfg: Client(cfg, transport)):
+            result = json.loads(handlers.handler(Context(), "jmap_list_mailboxes")({}))
+        self.assertEqual(result["code"], "redirect_refused")
+        self.assertEqual(result["http_status"], 307)
+        self.assertEqual(len(transport.calls), 1)
+        env["JMAP_SESSION_URL"] = "https://mail.example/jmap/session"
+        transport = Transport(session_payload(), get_response("Mailbox", [{"id": "inbox", "role": "inbox"}]))
+        with patch.dict(os.environ, env), patch.object(handlers, "Client", side_effect=lambda cfg: Client(cfg, transport)):
+            result = json.loads(handlers.handler(Context(), "jmap_list_mailboxes")({}))
+        self.assertEqual(result["data"][0]["role"], "inbox")
+        self.assertEqual(transport.calls[0][1], env["JMAP_SESSION_URL"])
 
     def test_invalid_json_duplicate_keys_and_nonfinite_constants(self):
         for data in (b'{"state":"a","state":"b"}', b'{"x":NaN}', b'{"x":Infinity}', b'[]'):

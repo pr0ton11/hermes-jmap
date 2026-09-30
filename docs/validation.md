@@ -6,7 +6,7 @@ modified. Offline fixtures contain only synthetic identities and test secrets.
 ## Gates run
 
 - `HERMES_SOURCE=/tmp/hermes-jmap-upstream python -m unittest discover`:
-  61 tests discovered, 59 passed, 2 live Stalwart smoke tests skipped by default.
+  63 tests discovered, 61 passed, 2 live Stalwart smoke tests skipped by default.
 - Hermes `doctor_plugin` from inspected upstream commit
   `5c08ad68f7ec488057880752f8071cee154a6e60`: native discovery, manifest parsing,
   namespaced import and registration pass; 22 tools and one pre_tool_call hook.
@@ -57,3 +57,19 @@ This validation record was produced before the initial implementation commit and
 push. It does not certify installation into the user's Hermes profile. Local and
 Git installation instructions and a real temporary user-plugin installation
 test are provided.
+
+## First agent-test HTTP failure
+
+The first live agent test reported generic HTTP errors from list_mailboxes and
+list_email with `JMAP_SESSION_URL=https://mail.pr0.tech/.well-known/jmap`.
+Unauthenticated read-only endpoint probes confirmed that route returns HTTP 307
+with Location `/jmap/session`, and the direct route returns HTTP 200 with JSON
+content type. The client deliberately refuses redirects. This explains the
+reported failure without a credential probe or any account mutation.
+
+README now uses Stalwart's direct Session path. Errors report numeric HTTP status
+and a fixed request stage, and explicitly distinguish refused redirects.
+Regression coverage exercises both reported tool handlers for missing HTTP
+status/stage, and demonstrates the 307 failure and direct-path success with
+synthetic Session/mailbox responses. Authenticated reads on the user's installed
+agent still require retesting after the URL change and Hermes restart.

@@ -28,11 +28,13 @@ add `--ref` with its full 40-character commit ID to the install command.
 Supply these values through Hermes's installation prompts or its profile `.env`:
 
 ```dotenv
-JMAP_SESSION_URL=https://mail.example.org/.well-known/jmap
+JMAP_SESSION_URL=https://mail.example.org/jmap/session
 JMAP_USERNAME=you@example.org
 JMAP_SECRET=REPLACE_WITH_YOUR_SECRET
 ```
 
+The example uses Stalwart's direct Session path. Its `/.well-known/jmap` route can
+redirect to `/jmap/session`; use the direct path with this plugin.
 The URL is the authenticated Session resource for your server. Discovery must
 return a successful JSON Session directly; redirect responses are rejected.
 Never paste real credentials into chat, tool arguments, Git files, or fixtures.
@@ -166,6 +168,9 @@ pipeline and are for trusted testing/code only.
 - JSON requests/responses cap at 8 MiB, with lower advertised request limits
   respected. Errors use static messages and safe codes; response bodies, headers,
   credentials and exception URLs are never included in diagnostics or plugin logs.
+  HTTP failures include a numeric `http_status` and a fixed `stage` identifier
+  (`session_discovery`, `jmap_api` or `attachment_download`). Redirect failures use
+  `redirect_refused` and explain that the direct Session URL is required.
   Credential echoes in normalized strings are redacted. Rate limits return a
   bounded numeric retry-after indication without sleeping or retrying.
 
