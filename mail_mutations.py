@@ -4,9 +4,10 @@ from email.utils import parseaddr
 
 from . import models
 from .errors import JMAPError, malformed
+from .attachments import draft_attachments
 from .session import MAIL, SUBMISSION
 
-DRAFT_PROPERTIES = ["id", "keywords", "mailboxIds", "from", "to", "cc", "bcc", "replyTo", "subject", "bodyStructure", "attachments"]
+DRAFT_PROPERTIES = ["id", "keywords", "mailboxIds", "from", "to", "cc", "bcc", "replyTo", "subject", "bodyStructure", "attachments", "messageId", "inReplyTo", "references"]
 
 
 def validate_addresses(values):
@@ -44,6 +45,23 @@ def reusable_structure(part):
     return result
 
 
+def replace_attachments(structure, old_parts, new_parts):
+    blobs = {part["blobId"] for part in old_parts}
+    def keep(part):
+        if part.get("blobId") in blobs:
+            return None
+        if "subParts" in part:
+            children = [child for item in part["subParts"] if (child := keep(item)) is not None]
+            if not children:
+                return None
+            part = dict(part, subParts=children)
+        return part
+    body = keep(structure)
+    if body is None:
+        raise JMAPError("draft_not_editable", "The draft body could not be retained while replacing attachments.")
+    return {"type": "multipart/mixed", "subParts": [body, *new_parts]} if new_parts else body
+
+
 class MailMutations:
     def __init__(self, client):
         self.client = client
@@ -72,28 +90,40 @@ class MailMutations:
             raise JMAPError("identity_selection", "Choose an accessible sending identity ID for this account.")
         return candidates[0], account
 
-    def create_draft(self, to, subject, body, cc=None, bcc=None, identity_id=None):
+    def create_draft(self, to, subject, body, cc=None, bcc=None, identity_id=None, attachments=None):
         validate_addresses({"to": to, "cc": cc, "bcc": bcc})
         identity, account = self._identity(identity_id)
+        parts = draft_attachments(self.client, attachments)
+        return self._create_draft(identity, account, to, subject, body, cc, bcc, parts)
+
+    def _create_draft(self, identity, account, to, subject, body, cc=None, bcc=None, parts=None, headers=None):
+        validate_addresses({"to": to, "cc": cc, "bcc": bcc})
         mailboxes = self.client.get("Mailbox", None, MAIL, account_id=account)
         drafts = [item["id"] for item in mailboxes["list"] if item.get("role") == "drafts"]
         if len(drafts) != 1:
             raise JMAPError("drafts_mailbox", "An accessible drafts-role mailbox is required.")
         item = {"mailboxIds": {drafts[0]: True}, "keywords": {"$draft": True}, "from": [{"email": identity["email"], "name": identity.get("name", "")}],
-                "to": to, "cc": cc or [], "bcc": bcc or [], "subject": subject, **body_structure(body, [])}
+                "to": to, "cc": cc or [], "bcc": bcc or [], "subject": subject, **body_structure(body, parts or []), **(headers or {})}
         result = self.client.set("Email", MAIL, account_id=account, create={"draft": item})
-        return models.envelope(result, action="draft_created", sends_email=False)
+        return models.envelope(result, action="draft_created" if result["success"] else "draft_creation_failed", sends_email=False,
+                               email_id=result["created"].get("draft"), identity_id=identity["id"])
 
     def update_draft(self, email_id, if_in_state=None, **changes):
         if not changes:
             raise JMAPError("invalid_arguments", "Specify at least one draft field to change.")
         validate_addresses(changes)
         old, state = self._draft(email_id, if_in_state)
-        replacement = {key: copy.deepcopy(old[key]) for key in ("mailboxIds", "keywords", "from", "to", "cc", "bcc", "replyTo", "subject") if key in old}
+        replacement = {key: copy.deepcopy(old[key]) for key in ("mailboxIds", "keywords", "from", "to", "cc", "bcc", "replyTo", "subject", "inReplyTo", "references") if key in old}
+        descriptors = changes.pop("attachments", None)
+        parts = draft_attachments(self.client, descriptors) if descriptors is not None else old.get("attachments", [])
         if "body" in changes:
-            replacement.update(body_structure(changes.pop("body"), old.get("attachments", [])))
+            replacement.update(body_structure(changes.pop("body"), parts))
         else:
-            replacement["bodyStructure"] = reusable_structure(old.get("bodyStructure"))
+            structure = reusable_structure(old.get("bodyStructure"))
+            if descriptors is not None:
+                # Retain original body alternatives; remove attachment subtrees and append the new set.
+                structure = replace_attachments(structure, old.get("attachments", []), parts)
+            replacement["bodyStructure"] = structure
         replacement.update(changes)
         created = self.client.set("Email", MAIL, account_id=self.account_id, if_in_state=state, create={"replacement": replacement})
         if not created["success"]:

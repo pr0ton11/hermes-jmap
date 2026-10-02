@@ -7,6 +7,8 @@ CORE = "urn:ietf:params:jmap:core"
 MAIL = "urn:ietf:params:jmap:mail"
 SUBMISSION = "urn:ietf:params:jmap:submission"
 CALENDARS = "urn:ietf:params:jmap:calendars"
+CALENDAR_PARSE = "urn:ietf:params:jmap:calendars:parse"
+CONTACTS = "urn:ietf:params:jmap:contacts"
 AVAILABILITY = "urn:ietf:params:jmap:principals:availability"
 
 

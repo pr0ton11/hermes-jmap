@@ -148,12 +148,13 @@ class MutationTests(unittest.TestCase):
         self.assertEqual(len(transport.calls), 3)
 
     def test_calendar_create_scheduling_default_and_rights(self):
-        _, calendar, transport = self.operations(get_response("Calendar", [{"id": "c", "myRights": {"mayWriteAll": True}}]), set_response("CalendarEvent", created={"event": {"id": "e"}}))
+        _, calendar, transport = self.operations(get_response("Calendar", [{"id": "c", "myRights": {"mayWriteAll": True}}]), set_response("CalendarEvent", created={"event": {"id": "e"}}), get_response("CalendarEvent", [{"id": "e", "title": "Dentist"}]))
         result = calendar.create_event("c", "Dentist", "2026-10-01T10:00:00", "PT1H")
-        request = json.loads(transport.calls[-1][3])["methodCalls"][0][1]
+        request = json.loads(transport.calls[-2][3])["methodCalls"][0][1]
         self.assertFalse(request["sendSchedulingMessages"])
         self.assertEqual(request["create"]["event"]["timeZone"], "Europe/Zurich")
         self.assertTrue(result["data"]["success"])
+        self.assertTrue(result["readback_verified"])
         _, calendar, transport = self.operations(get_response("Calendar", [{"id": "c", "myRights": {"mayWriteAll": False}}]))
         with self.assertRaises(JMAPError):
             calendar.create_event("c", "Event", "2026-10-01T10:00:00", "PT1H")
@@ -163,10 +164,12 @@ class MutationTests(unittest.TestCase):
         item = {"id": "occ", "baseEventId": "series", "recurrenceId": "2026-10-01T10:00:00", "calendarIds": {"c": True}, "start": "2026-10-01T10:00:00", "duration": "PT1H", "timeZone": "Europe/Zurich", "isOrigin": True}
         for method in ("update", "delete"):
             _, calendar, transport = self.operations(get_response("CalendarEvent", [item]), get_response("Calendar", [{"id": "c", "myRights": {"mayWriteOwn": True}}]),
-                                                     set_response("CalendarEvent", **({"updated": {"occ": None}} if method == "update" else {"destroyed": ["occ"]})))
+                                                     set_response("CalendarEvent", **({"updated": {"occ": None}} if method == "update" else {"destroyed": ["occ"]})),
+                                                     *([get_response("CalendarEvent", [dict(item, title="Changed")])] if method == "update" else []))
             result = calendar.update_event("occ", {"title": "Changed"}, send_scheduling_messages=True) if method == "update" else calendar.delete_event("occ")
             self.assertEqual(result["scope"], "occurrence")
-            self.assertEqual(json.loads(transport.calls[-1][3])["methodCalls"][0][1]["ifInState"], "s2")
+            request = next(json.loads(call[3])["methodCalls"][0][1] for call in transport.calls[1:] if json.loads(call[3])["methodCalls"][0][0] == "CalendarEvent/set")
+            self.assertEqual(request["ifInState"], "s2")
 
     def test_object_set_errors_and_malformed_results(self):
         mail, _, _ = self.operations(set_response("Email", notUpdated={"e": {"type": "forbidden", "description": "secret"}}))

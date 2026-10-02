@@ -18,6 +18,9 @@ def approval_hook(tool_name="", args=None, **kwargs):
                     "jmap_delete_email": "Permanently delete the selected email from every mailbox? This cannot be undone through this plugin.",
                     "jmap_create_event": "Create the requested calendar event?",
                     "jmap_update_event": "Change the selected calendar event or occurrence?",
-                    "jmap_delete_event": "Delete the selected calendar event or occurrence?"}
-        scheduling = isinstance(args, dict) and args.get("send_scheduling_messages") is True
+                    "jmap_delete_event": "Delete the selected calendar event or occurrence?",
+                    "jmap_respond_to_event": "Send the requested attendance response to the meeting organizer?",
+                    "jmap_import_calendar_invitation": "Import the selected email invitation into the requested calendar?",
+                    "jmap_delete_contact": "Permanently delete the selected contact from every address book?"}
+        scheduling = tool_name == "jmap_respond_to_event" or isinstance(args, dict) and args.get("send_scheduling_messages") is True
         return {"action": "approve", "message": messages[tool_name] + (" This also requests scheduling messages to participants." if scheduling else ""), "rule_key": tool_name}

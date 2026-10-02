@@ -136,7 +136,7 @@ class HardeningTests(unittest.TestCase):
 
     def test_no_compose_send_and_delete_is_explicitly_destructive(self):
         schemas = importlib.import_module(PACKAGE + ".schemas")
-        self.assertEqual(len(schemas.SCHEMAS), 22)
+        self.assertNotIn("jmap_compose_and_send", schemas.SCHEMAS)
         self.assertIn("DESTRUCTIVE", schemas.SCHEMAS["jmap_delete_email"]["description"])
         self.assertIn("jmap_delete_email", schemas.CONSEQUENTIAL)
         self.assertNotIn("body", schemas.SCHEMAS["jmap_send_draft"]["parameters"]["properties"])

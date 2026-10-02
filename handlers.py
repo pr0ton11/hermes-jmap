@@ -9,8 +9,13 @@ from .mail import Mail
 from .calendar_ops import Calendar
 from .availability import calendar_availability
 from .schemas import MUTATIONS, TOOLSETS, validate
-from .mail_mutations import MailMutations
+from .mail_workflows import MailWorkflows
+from .mail_organization import MailOrganization, TOOLS as ORGANIZATION_TOOLS
 from .calendar_mutations import CalendarMutations
+from .contacts import Contacts
+from .invitations import Invitations
+from .identities import mail_identities, participant_identities
+from .status import status
 
 
 def redact(value, secrets):
@@ -32,14 +37,24 @@ def handler(ctx, name):
             client = Client(Config.from_plugin(ctx, os.environ))
             if name in MUTATIONS and not client.config.enable_mutations:
                 raise JMAPError("mutations_disabled", "Enable this plugin's enable_mutations setting before using write tools.")
-            if name == "jmap_calendar_availability":
+            if name == "jmap_status":
+                result = status(client)
+            elif name == "jmap_list_identities":
+                result = mail_identities(client)
+            elif name == "jmap_list_participant_identities":
+                result = participant_identities(client)
+            elif name == "jmap_calendar_availability":
                 result = calendar_availability(Calendar(client), **args)
             else:
                 owners = {"jmap_calendar_read": Calendar, "jmap_calendar_write": CalendarMutations,
-                          "jmap_mail_read": Mail, "jmap_mail_write": MailMutations}
-                owner = owners[TOOLSETS[name]](client)
-                if name == "jmap_create_event" and "timezone" not in args:
-                    args = dict(args, timezone=client.config.timezone)
+                          "jmap_mail_read": Mail, "jmap_mail_write": MailWorkflows,
+                          "jmap_contacts_read": Contacts, "jmap_contacts_write": Contacts}
+                kind = owners[TOOLSETS[name]]
+                if name in ORGANIZATION_TOOLS:
+                    kind = MailOrganization
+                elif name in {"jmap_preview_calendar_invitation", "jmap_import_calendar_invitation"}:
+                    kind = Invitations
+                owner = kind(client)
                 result = getattr(owner, name.removeprefix("jmap_"))(**args)
             # A hostile server can echo authentication strings in otherwise normal
             # content. Redact string values before serialization to preserve JSON.

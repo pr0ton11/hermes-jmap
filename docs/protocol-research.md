@@ -53,3 +53,45 @@ Treat all remote strings as untrusted data and label them accordingly. No messag
 The Python candidate **jmapc 0.3.0** was released May 23, 2026 (previous release January 2025), so there is recent maintenance evidence. Its published method list covers mail and submissions, but calendar requires `CustomMethod` plus our own models. It is GPL-3.0, Python >=3.10. This is not a claim of abandonment or calendar parity. [PyPI](https://pypi.org/project/jmapc/), [project](https://github.com/smkent/jmapc).
 
 Recommendation: a small direct JSON/HTTP adapter with injected transport, Python standard-library dataclasses/zoneinfo and no JMAP framework. This keeps calendar draft handling and bounded/secret-safe HTTP behavior under test. Prefer the HTTP client already supplied by Hermes if its plugin dependency rules permit, otherwise use standard-library urllib with explicit redirect rejection. Avoid adding a recurrence dependency when server expansion meets the requirement. This recommendation follows the inspected capability gap, rather than dependency count alone.
+
+## Version 0.2.0 extension evidence
+
+Reviewed on 2026-10-02 against the same pinned Stalwart commit.
+The extension uses JMAP capabilities instead of an alternative mail or calendar protocol.
+Contacts use [RFC 9610](https://www.rfc-editor.org/rfc/rfc9610.html) and
+[JSContact RFC 9553](https://www.rfc-editor.org/rfc/rfc9553.html).
+AddressBook/get returns metadata and rights. ContactCard/query/get provides search and bounded retrieval.
+ContactCard/set applies field patches and state guards. Contact edits retain fields outside the requested changes.
+
+[Stalwart ContactCard/set](https://github.com/stalwartlabs/stalwart/blob/648df2d6f1fa7e1a5ccf005949273179386fe037/crates/jmap/src/contact/set.rs)
+provides the server evidence for contact writes.
+Account capabilities control address-book creation. Address-book rights control contact writes.
+There is no address-book deletion or sharing tool in this version.
+
+[CalendarEvent/set](https://github.com/stalwartlabs/stalwart/blob/648df2d6f1fa7e1a5ccf005949273179386fe037/crates/jmap/src/calendar_event/set.rs)
+distinguishes private fields, RSVP rights and event ownership.
+Reminders use Alert objects with OffsetTrigger values. Default reminders use `useDefaultAlerts`.
+Meeting links use `virtualLocations`. ParticipantIdentity/get resolves the caller's scheduling address.
+RSVP patches only the matching participant and requests scheduling messages explicitly.
+
+[CalendarEvent/parse](https://github.com/stalwartlabs/stalwart/blob/648df2d6f1fa7e1a5ccf005949273179386fe037/crates/jmap/src/calendar_event/parse.rs)
+parses uploaded iCalendar blobs into events.
+The pinned [Cargo.lock](https://github.com/stalwartlabs/stalwart/blob/648df2d6f1fa7e1a5ccf005949273179386fe037/Cargo.lock)
+selects calcard 0.3.14.
+Its [conversion source](https://docs.rs/crate/calcard/0.3.14/source/src/jscalendar/import/convert.rs)
+copies VCALENDAR METHOD into each converted entry.
+This supports explicit REQUEST/PUBLISH selection instead of guessing from email text.
+The plugin verifies attachment ownership before parsing.
+A blob from another account is copied through bounded download/upload before parsing in the calendar account.
+Import selects one REQUEST/PUBLISH snapshot and excludes sender reminders and transport metadata.
+An existing UID/recurrence identity returns its existing event ID without overwrite.
+Import never sends a scheduling response automatically.
+
+Mail uploads use the discovered `uploadUrl` from RFC 8620.
+Reply drafts use Reply-To, message IDs and references from RFC 8621.
+Forward drafts attach the verified original MIME blob as `message/rfc822`.
+Mailbox metadata and incremental mailbox/keyword patches use RFC 8621.
+Custom keywords exclude system flags. Server-side automation remains outside the implementation.
+
+These are source and specification checks. No live Stalwart write result is claimed.
+Calendar draft compatibility still follows the pinned server wire format above.

@@ -1,6 +1,6 @@
 name: hermes-jmap
-version: 0.1.0
-description: Personal JMAP email and calendar tools with explicit consequential actions
+version: 0.2.0
+description: Personal JMAP email, calendars and contacts with explicit consequential actions
 kind: standalone
 manifest_version: 2
 requires_env:
@@ -15,12 +15,16 @@ config_schema:
   auth_type: {type: str, default: basic, choices: [basic, bearer]}
   mail_account_id: {type: str, description: Optional explicit mail account ID}
   calendar_account_id: {type: str, description: Optional explicit calendar account ID}
+  contacts_account_id: {type: str, description: Optional explicit contacts account ID}
   timezone: {type: str, default: Europe/Zurich}
   timeout_seconds: {type: int, default: 20}
   max_attachment_bytes: {type: int, default: 10485760}
   trusted_origins: {type: list, default: []}
   enable_mutations: {type: bool, default: false}
 provides_tools:
+  - jmap_status
+  - jmap_list_identities
+  - jmap_list_participant_identities
   - jmap_list_mailboxes
   - jmap_list_email
   - jmap_search_email
@@ -43,5 +47,25 @@ provides_tools:
   - jmap_create_event
   - jmap_update_event
   - jmap_delete_event
+  - jmap_respond_to_event
+  - jmap_preview_calendar_invitation
+  - jmap_import_calendar_invitation
+  - jmap_upload_attachment
+  - jmap_create_reply_draft
+  - jmap_create_forward_draft
+  - jmap_create_mailbox
+  - jmap_update_mailbox
+  - jmap_update_email_mailboxes
+  - jmap_update_email_keywords
+  - jmap_list_address_books
+  - jmap_get_address_book
+  - jmap_list_contacts
+  - jmap_search_contacts
+  - jmap_get_contact
+  - jmap_create_address_book
+  - jmap_update_address_book
+  - jmap_create_contact
+  - jmap_update_contact
+  - jmap_delete_contact
 provides_hooks:
   - pre_tool_call

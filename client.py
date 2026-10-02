@@ -42,10 +42,12 @@ class Client:
         self._session = None
         self._lock = threading.RLock()
 
-    def _request(self, method, url, payload=None, *, mutation=False, max_bytes=MAX_JSON_BYTES, stage="jmap_api"):
+    def _request(self, method, url, payload=None, *, mutation=False, max_bytes=MAX_JSON_BYTES, stage="jmap_api", raw=None, content_type=None):
         self.config.authorize_endpoint(url)
         headers = {"Authorization": self.config.authorization(), "Accept": "application/json"}
-        body = None
+        body = raw
+        if raw is not None:
+            headers["Content-Type"] = content_type or "application/octet-stream"
         if payload is not None:
             headers["Content-Type"] = "application/json"
             body = json.dumps(payload, allow_nan=False).encode()
@@ -254,3 +256,27 @@ class Client:
         if "{" in template or "}" in template:
             raise malformed()
         return self._request("GET", template, max_bytes=self.config.max_attachment_bytes, stage="attachment_download")
+
+    def upload(self, account_id, data, content_type="application/octet-stream"):
+        """Upload bounded binary data; JSON request limits do not bound binary uploads."""
+        if account_id not in self.session.accounts or self.session.accounts[account_id]["isReadOnly"]:
+            raise JMAPError("read_only_account", "Select a writable upload account.")
+        maximum = self.session.limit("maxSizeUpload", self.config.max_attachment_bytes)
+        if len(data) > maximum:
+            raise JMAPError("attachment_too_large", "The attachment exceeds the server or configured upload limit.")
+        if not isinstance(content_type, str) or not content_type or any(ord(c) < 32 for c in content_type):
+            raise JMAPError("invalid_arguments", "Use a valid MIME content type without control characters.")
+        template = self.session.upload_url.replace("{accountId}", quote(account_id, safe=""))
+        if "{" in template or "}" in template:
+            raise malformed()
+        try:
+            result = self._decode(self._request("POST", template, mutation=True, raw=data, content_type=content_type, stage="attachment_upload"))
+            if (result.get("accountId") != account_id or not isinstance(result.get("blobId"), str) or not result["blobId"]
+                    or type(result.get("size")) is not int or result["size"] != len(data)
+                    or not isinstance(result.get("type"), str)):
+                raise malformed()
+            return {key: result[key] for key in ("accountId", "blobId", "size", "type")}
+        except JMAPError as error:
+            if error.code in {"malformed_response", "response_too_large"}:
+                error.outcome_unknown = True
+            raise

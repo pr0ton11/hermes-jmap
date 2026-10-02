@@ -4,7 +4,7 @@ from .errors import JMAPError, malformed
 from .session import CALENDARS
 from .time_utils import query_range, zone
 
-EVENT_PROPERTIES = ["id", "baseEventId", "calendarIds", "uid", "title", "description", "start", "duration", "timeZone", "utcStart", "utcEnd", "showWithoutTime", "locations", "participants", "organizerCalendarAddress", "recurrenceRule", "recurrenceOverrides", "recurrenceId", "status", "freeBusyStatus", "isOrigin", "isDraft"]
+EVENT_PROPERTIES = ["id", "baseEventId", "calendarIds", "uid", "title", "description", "start", "duration", "timeZone", "utcStart", "utcEnd", "showWithoutTime", "locations", "virtualLocations", "alerts", "useDefaultAlerts", "participants", "organizerCalendarAddress", "recurrenceRule", "recurrenceOverrides", "recurrenceId", "status", "freeBusyStatus", "isOrigin", "isDraft"]
 
 
 def event(item):
@@ -21,7 +21,7 @@ class Calendar:
 
     def list_calendars(self):
         result = self._get("Calendar", None)
-        fields = ("id", "name", "description", "color", "sortOrder", "isSubscribed", "isVisible", "includeInAvailability", "timeZone", "myRights")
+        fields = ("id", "name", "description", "color", "sortOrder", "isSubscribed", "isVisible", "includeInAvailability", "timeZone", "myRights", "defaultAlertsWithTime", "defaultAlertsWithoutTime")
         maximum = self.client.session.capabilities["urn:ietf:params:jmap:core"].get("maxObjectsInGet", 100)
         complete = type(maximum) is int and len(result["list"]) < maximum and not result["notFound"]
         return models.envelope([{key: item.get(key) for key in fields} for item in result["list"]], state=result["state"],
@@ -31,7 +31,7 @@ class Calendar:
         result = self._get("Calendar", [calendar_id])
         if not result["list"]:
             raise JMAPError("not_found", "Calendar not found or not accessible.")
-        fields = ("id", "name", "description", "color", "sortOrder", "isSubscribed", "isVisible", "includeInAvailability", "timeZone", "myRights")
+        fields = ("id", "name", "description", "color", "sortOrder", "isSubscribed", "isVisible", "includeInAvailability", "timeZone", "myRights", "defaultAlertsWithTime", "defaultAlertsWithoutTime")
         return models.envelope({key: result["list"][0].get(key) for key in fields}, state=result["state"])
 
     def get_event(self, event_id, timezone=None):

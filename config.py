@@ -46,6 +46,7 @@ class Config:
     max_attachment_bytes: int = 10 * 1024 * 1024
     trusted_origins: tuple = ()
     enable_mutations: bool = False
+    contacts_account_id: str | None = None
 
     def __post_init__(self):
         origin(self.session_url)
@@ -55,7 +56,7 @@ class Config:
             raise JMAPError("invalid_configuration", "Authentication configuration contains invalid characters.")
         if self.auth_type == "basic" and ":" in self.username:
             raise JMAPError("invalid_configuration", "Basic authentication usernames cannot contain a colon.")
-        for identifier in (self.mail_account_id, self.calendar_account_id):
+        for identifier in (self.mail_account_id, self.calendar_account_id, self.contacts_account_id):
             if identifier is not None and (not isinstance(identifier, str) or not identifier):
                 raise JMAPError("invalid_configuration", "Account overrides must be nonempty account ID strings.")
         integer(self.timeout_seconds, 1, 120, "timeout_seconds")
@@ -86,6 +87,7 @@ class Config:
             "timezone": "Europe/Zurich", "timeout_seconds": 20,
             "max_attachment_bytes": 10 * 1024 * 1024, "trusted_origins": [],
             "enable_mutations": False,
+            "contacts_account_id": None,
         }.items()}
         if not isinstance(settings["trusted_origins"], list) or not all(isinstance(x, str) for x in settings["trusted_origins"]):
             raise JMAPError("invalid_configuration", "trusted_origins must be a list of endpoint origins.")

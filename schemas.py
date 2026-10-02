@@ -107,6 +107,92 @@ MUTATIONS = set(MAIL_WRITES) | set(CALENDAR_WRITES)
 CONSEQUENTIAL = {"jmap_send_draft", "jmap_delete_email", *CALENDAR_WRITES}
 
 
+def add_tool(name, toolset, description, properties=None, required=(), *, write=False, approval=False):
+    SCHEMAS[name] = schema(name, description, properties, required)
+    TOOLSETS[name] = toolset
+    if write:
+        MUTATIONS.add(name)
+    if approval:
+        CONSEQUENTIAL.add(name)
+
+
+add_tool("jmap_status", "jmap_core_read", "Read-only: diagnose advertised capabilities, selected accounts and write access. If write tools are unavailable, check this tool and enable_mutations in plugin settings, then restart Hermes.")
+add_tool("jmap_list_identities", "jmap_mail_read", "Read-only: discover sending identities for the selected mail account.")
+add_tool("jmap_list_participant_identities", "jmap_calendar_read", "Read-only: discover calendar participant identities and the default organizer identity.")
+
+REMINDERS = {"type": "array", "maxItems": 100, "items": {"type": "object", "properties": {
+    "minutes_before": {"type": "integer", "minimum": 0, "maximum": 525600},
+    "action": {"type": "string", "enum": ["display", "email"]},
+}, "required": ["minutes_before", "action"], "additionalProperties": False}}
+VIRTUAL_LOCATION = {"type": "object", "properties": {"name": string("Meeting name"), "uri": string("Meeting URI"),
+    "description": {"type": "string", "maxLength": 20000}}, "required": ["uri"], "additionalProperties": False}
+RICH_EVENT = {"all_day": {"type": "boolean", "description": "Midnight local start, whole-day duration PnD, floating timezone; omission preserves existing display mode"},
+    "reminders": {**REMINDERS, "description": "Replace reminders; [] clears them and disables default alerts. Delivery is by calendar clients or the server."},
+    "use_default_alerts": {"type": "boolean"},
+    "virtual_locations": {"type": "object", "additionalProperties": VIRTUAL_LOCATION, "maxProperties": 100}}
+SCHEMAS["jmap_create_event"]["parameters"]["properties"].update({**RICH_EVENT, "participant_identity_id": string("Organizer identity from jmap_list_participant_identities; otherwise resolve the default when sending invitations")})
+SCHEMAS["jmap_update_event"]["parameters"]["properties"]["changes"]["properties"].update(RICH_EVENT)
+add_tool("jmap_respond_to_event", "jmap_calendar_write", "CONSEQUENTIAL: accept, decline or tentatively accept an existing invitation as your verified participant identity. Sends a scheduling response after Hermes approval; get the event first to distinguish a series from an occurrence.", {
+    "event_id": string("Opaque event or occurrence ID"), "participation_status": {"type": "string", "enum": ["accepted", "declined", "tentative"]},
+    "participant_identity_id": string("Optional identity ID; ambiguity requires an explicit choice"), **STATE}, ("event_id", "participation_status"), write=True, approval=True)
+INVITATION_SOURCE = {"email_id": string("Owning email ID"), "blob_id": string("Verified .ics attachment blob ID")}
+add_tool("jmap_preview_calendar_invitation", "jmap_calendar_read", "Read-only parsing: preview a verified .ics email attachment. Cross-account parsing may upload a bounded temporary blob to the calendar account; never creates events or sends scheduling messages.", INVITATION_SOURCE, ("email_id", "blob_id"))
+add_tool("jmap_import_calendar_invitation", "jmap_calendar_write", "CONSEQUENTIAL: explicitly import one REQUEST/PUBLISH event selected from an attachment preview. A duplicate UID/recurrence returns the existing target without overwriting it. Import does not send a response; use jmap_respond_to_event separately.", {
+    **INVITATION_SOURCE, "calendar_id": string("Destination calendar ID"), "uid": string("UID selected from the preview"),
+    "recurrence_id": string("Optional local recurrence identity selected from the preview")}, ("email_id", "blob_id", "calendar_id", "uid"), write=True, approval=True)
+
+ATTACHMENT = {"type": "object", "properties": {"account_id": string("Account returned by jmap_upload_attachment"),
+    "blob_id": string("Uploaded blob ID"), "name": string("Attachment filename"), "type": string("MIME media type"),
+    "size": {"type": "integer", "minimum": 0, "maximum": 104857600}}, "required": ["account_id", "blob_id", "name", "type", "size"], "additionalProperties": False}
+ATTACHMENTS = {"type": "array", "maxItems": 100, "items": ATTACHMENT}
+SCHEMAS["jmap_create_draft"]["parameters"]["properties"]["attachments"] = ATTACHMENTS
+SCHEMAS["jmap_update_draft"]["parameters"]["properties"]["attachments"] = {**ATTACHMENTS, "description": "Replace the attachment set; omit to preserve existing attachments, [] removes them"}
+add_tool("jmap_upload_attachment", "jmap_mail_write", "Mutation: upload an explicit local regular file to the selected mail account. Returns bounded blob metadata for draft attachments; never sends email. The path must be on the host running this plugin.", {
+    "path": string("Explicit local file path"), "name": string("Optional filename; defaults to local basename"), "content_type": string("Optional MIME type")}, ("path",), write=True)
+add_tool("jmap_create_reply_draft", "jmap_mail_write", "Mutation: create an unsent threaded reply. Honors Reply-To; reply_all adds original To/Cc, removes your sending identities and duplicates, and never copies original Bcc. Returns the new draft and selected identity for the separate send tool.", {
+    **EMAIL_ID, "body": DRAFT_FIELDS["body"], "reply_all": {"type": "boolean", "default": False},
+    "identity_id": string("Optional sending identity ID"), "attachments": ATTACHMENTS}, ("email_id", "body"), write=True)
+add_tool("jmap_create_forward_draft", "jmap_mail_write", "Mutation: create an unsent forward with the original MIME message attached as .eml, preserving its contents and attachments. Sending is separate.", {
+    **EMAIL_ID, "to": DRAFT_FIELDS["to"], "body": DRAFT_FIELDS["body"], "cc": ADDRESSES, "bcc": ADDRESSES,
+    "identity_id": string("Optional sending identity ID"), "attachments": ATTACHMENTS}, ("email_id", "to", "body"), write=True)
+MAILBOX_FIELDS = {"name": string("Mailbox name"), "parent_id": {"anyOf": [string("Parent mailbox ID"), {"type": "null"}]},
+    "sort_order": {"type": "integer", "minimum": 0, "maximum": 2147483647}, "is_subscribed": {"type": "boolean"}}
+add_tool("jmap_create_mailbox", "jmap_mail_write", "Mutation: create a mailbox, optionally under an existing parent. Respects account and parent permissions.", MAILBOX_FIELDS, ("name",), write=True)
+add_tool("jmap_update_mailbox", "jmap_mail_write", "Mutation: change mailbox name, parent, sort order or subscription with a state guard.", {
+    "mailbox_id": string("Mailbox ID"), "changes": {"type": "object", "properties": MAILBOX_FIELDS, "additionalProperties": False, "minProperties": 1}, **STATE}, ("mailbox_id", "changes"), write=True)
+IDS = {"type": "array", "items": string("ID"), "uniqueItems": True, "maxItems": 100}
+add_tool("jmap_update_email_mailboxes", "jmap_mail_write", "Mutation: add/remove selected mailbox memberships while retaining unrelated memberships. An email must remain in at least one mailbox.", {
+    **EMAIL_ID, "add_mailbox_ids": IDS, "remove_mailbox_ids": IDS, **STATE}, ("email_id",), write=True)
+KEYWORDS = {"type": "array", "items": string("Custom keyword; no system keywords starting with $"), "uniqueItems": True, "maxItems": 100}
+add_tool("jmap_update_email_keywords", "jmap_mail_write", "Mutation: add/remove custom keywords while retaining system flags and other labels.", {
+    **EMAIL_ID, "add_keywords": KEYWORDS, "remove_keywords": KEYWORDS, **STATE}, ("email_id",), write=True)
+SCHEMAS["jmap_search_email"]["parameters"]["properties"].update({"keyword": string("Required keyword match"), "not_keyword": string("Excluded keyword match")})
+
+CONTACT_VALUE = lambda field: {"type": "object", "properties": {field: string(field), "label": string("Optional label")}, "required": [field], "additionalProperties": False}
+CONTACT_FIELDS = {"full_name": string("Full display name"), "emails": {"type": "array", "items": CONTACT_VALUE("address"), "maxItems": 100},
+    "phones": {"type": "array", "items": CONTACT_VALUE("number"), "maxItems": 100},
+    "organizations": {"type": "array", "items": CONTACT_VALUE("name"), "maxItems": 100},
+    "addresses": {"type": "array", "items": CONTACT_VALUE("full"), "maxItems": 100},
+    "notes": {"type": "array", "items": {"type": "string", "maxLength": 100000}, "maxItems": 100}}
+BOOK_FIELDS = {"name": {**string("Address book name"), "maxLength": 255}, "description": {"anyOf": [{"type": "string", "maxLength": 20000}, {"type": "null"}]},
+    "sort_order": {"type": "integer", "minimum": 0, "maximum": 2147483647}, "is_subscribed": {"type": "boolean"}}
+add_tool("jmap_list_address_books", "jmap_contacts_read", "Read-only: list address books, defaults and permissions; inspect completeness.")
+add_tool("jmap_get_address_book", "jmap_contacts_read", "Read-only: get an address book and its permissions.", {"address_book_id": string("Address book ID")}, ("address_book_id",))
+CONTACT_SEARCH = {**PAGINATION, "address_book_id": string("Optional address book ID"), **{field: string("Contact " + field + " match") for field in ("text", "name", "email", "phone", "organization")}}
+add_tool("jmap_list_contacts", "jmap_contacts_read", "Read-only: list bounded contact summaries; follow next_position.", {**PAGINATION, "address_book_id": CONTACT_SEARCH["address_book_id"]})
+add_tool("jmap_search_contacts", "jmap_contacts_read", "Read-only: search contacts to resolve recipients. Present ambiguous matches before composing email.", CONTACT_SEARCH)
+add_tool("jmap_get_contact", "jmap_contacts_read", "Read-only: get a contact with original JSContact properties and state.", {"contact_id": string("Contact ID")}, ("contact_id",))
+add_tool("jmap_create_address_book", "jmap_contacts_write", "Mutation: create an address book when account permissions permit.", BOOK_FIELDS, ("name",), write=True)
+add_tool("jmap_update_address_book", "jmap_contacts_write", "Mutation: update address book metadata while preserving sharing and other properties.", {
+    "address_book_id": string("Address book ID"), "changes": {"type": "object", "properties": BOOK_FIELDS, "additionalProperties": False, "minProperties": 1}, **STATE}, ("address_book_id", "changes"), write=True)
+add_tool("jmap_create_contact", "jmap_contacts_write", "Mutation: create a contact in an explicit writable address book.", {
+    "address_book_id": string("Destination address book ID"), **CONTACT_FIELDS}, ("address_book_id", "full_name"), write=True)
+add_tool("jmap_update_contact", "jmap_contacts_write", "Mutation: update only selected contact fields. Arrays replace that field; omitted fields, membership and extensions are preserved.", {
+    "contact_id": string("Contact ID"), "changes": {"type": "object", "properties": CONTACT_FIELDS, "additionalProperties": False, "minProperties": 1}, **STATE}, ("contact_id", "changes"), write=True)
+add_tool("jmap_delete_contact", "jmap_contacts_write", "DESTRUCTIVE: permanently delete one contact from every address book with a state guard and Hermes approval.", {
+    "contact_id": string("Contact ID"), **STATE}, ("contact_id",), write=True, approval=True)
+
+
 def validate(name, args):
     """Small validator for the authored schemas. Reject unknown fields and bool-as-int."""
     from .errors import JMAPError

@@ -1,6 +1,6 @@
 # Hermes JMAP
 
-A native Hermes user plugin for personal email and calendars over JMAP.
+A native Hermes user plugin for personal email, calendars and contacts over JMAP.
 Targets current Stalwart, without modifying Hermes core. Python 3.11+; no runtime
 dependencies beyond the standard library.
 
@@ -58,6 +58,7 @@ plugins:
         enable_mutations: false
         # mail_account_id: ACCOUNT_ID
         # calendar_account_id: ACCOUNT_ID
+        # contacts_account_id: ACCOUNT_ID
 ```
 
 Endpoint URLs and account IDs come from Session discovery. The selected primary
@@ -68,16 +69,66 @@ hosts must be explicitly trusted with HTTPS origin entries. Authorization is
 never forwarded to other origins or across redirects. Remote HTTP is refused;
 loopback HTTP is allowed for development.
 
+## Update an installed plugin
+
+On the machine that runs Hermes, run these commands in the active profile:
+
+```sh
+hermes plugins update hermes-jmap
+hermes plugins enable hermes-jmap
+hermes plugins doctor "${HERMES_HOME:-$HOME/.hermes}/plugins/hermes-jmap" --ci
+```
+
+If you installed a pinned commit, replace it with the desired full commit ID:
+
+```sh
+hermes plugins install pr0ton11/hermes-jmap --force --ref FULL_COMMIT_ID
+```
+
+If you installed a copied directory, copy the new checkout again using the exclusions above.
+Preserve your existing `.env` and other plugin configuration.
+For a named profile, use the same `hermes -p PROFILE` prefix for each Hermes command.
+The configuration file belongs to that active profile.
+
+To enable calendar entries and the other write tools, edit the existing configuration:
+
+```yaml
+plugins:
+  enabled: [hermes-jmap]  # Retain your other enabled plugins here.
+  entries:
+    hermes-jmap:
+      settings:
+        enable_mutations: true
+        timezone: Europe/Zurich
+```
+
+Merge these values into `HERMES_HOME/config.yaml`, which defaults to `~/.hermes/config.yaml`.
+Retain your other settings and credentials.
+Then restart the Hermes session. If you use the gateway, run `hermes gateway restart`.
+Ask the agent to call `jmap_status` and list your calendars.
+The status tool reports the write setting, advertised capabilities and selected account permissions.
+Calendar permissions still control which entries the agent can create or change.
+The default remains `enable_mutations: false` for new installations.
+If a tool remains absent, run `hermes tools` in the same profile.
+Enable the JMAP groups for the platform where you use the agent:
+`jmap_core_read`, `jmap_mail_read`, `jmap_mail_write`, `jmap_calendar_read`,
+`jmap_calendar_write`, `jmap_contacts_read` and `jmap_contacts_write`.
+Restart Hermes after saving the platform selection.
+
 ## Tools
+
+Version 0.2.0 provides 45 tools. The single write setting applies to all write toolsets.
+`jmap_core_read` provides status. Mail, calendar and contact toolsets each separate reads from writes.
 
 | Read-only mail | Purpose |
 |---|---|
 | jmap_list_mailboxes | Mailbox IDs, roles, counts and rights |
 | jmap_list_email | Newest email summaries, optional mailbox filter |
-| jmap_search_email | Text, sender, recipient, subject, dates, mailbox, unread, flagged |
+| jmap_search_email | Text, addresses, dates, mailbox, flags and keywords |
 | jmap_get_email | Summary and attachments; explicit optional bounded body |
 | jmap_get_thread | Bounded page of thread email summaries |
 | jmap_get_attachment | Explicit bounded download of a verified attachment |
+| jmap_list_identities | Sending identities |
 
 | Read-only calendar | Purpose |
 |---|---|
@@ -87,26 +138,90 @@ loopback HTTP is allowed for development.
 | jmap_search_events | Expanded occurrences matching text |
 | jmap_get_event | Series or occurrence with original timezone and recurrence data |
 | jmap_calendar_availability | Busy/free intervals and appointment conflicts |
+| jmap_list_participant_identities | Calendar scheduling identities |
+| jmap_preview_calendar_invitation | Parse a verified `.ics` email attachment without importing it |
 
 | Opt-in mutation | Purpose |
 |---|---|
-| jmap_create_draft | Create an unsent plain-text email draft |
+| jmap_create_draft | Create an unsent email draft with optional attachments |
+| jmap_create_reply_draft | Unsent reply or reply-all with threading headers |
+| jmap_create_forward_draft | Unsent forward with the original message attached |
+| jmap_upload_attachment | Upload an explicit local file and return its descriptor |
+| jmap_create_mailbox | Create a folder |
+| jmap_update_mailbox | Rename a folder or change its parent, order or subscription |
+| jmap_update_email_mailboxes | Add/remove folder memberships while retaining others |
+| jmap_update_email_keywords | Add/remove custom labels while retaining other keywords |
 | jmap_update_draft | Replace a draft, returning its new ID |
 | jmap_move_email | Move to a single mailbox, replacing current memberships |
 | jmap_mark_read | Change $seen while retaining other flags |
 | jmap_set_flagged | Change $flagged while retaining other flags |
 | jmap_send_draft | Submit a separately created draft for delivery |
 | jmap_delete_email | Permanently delete one email from every mailbox |
-| jmap_create_event | Create an event, optional recurrence/participants/location |
+| jmap_create_event | Create an event with all-day dates, reminders, meeting links or participants |
 | jmap_update_event | Explicitly change a series or occurrence |
 | jmap_delete_event | Explicitly delete a series or occurrence |
+| jmap_respond_to_event | Accept, decline or tentatively accept as the selected participant |
+| jmap_import_calendar_invitation | Import one selected invitation without sending a response |
+
+| Contacts | Purpose |
+|---|---|
+| jmap_list_address_books | Address books and rights |
+| jmap_get_address_book | One address book |
+| jmap_list_contacts | Contact summaries with pagination |
+| jmap_search_contacts | Search by text, name, email, phone or organization |
+| jmap_get_contact | Full contact card |
+| jmap_create_address_book | Create an address book, with writes enabled |
+| jmap_update_address_book | Change address book metadata, with writes enabled |
+| jmap_create_contact | Create a contact, with writes enabled |
+| jmap_update_contact | Change selected fields while retaining other card fields |
+| jmap_delete_contact | Permanently delete one contact, with writes enabled |
+
+`jmap_status` reports configuration and capability diagnostics without returning credentials or endpoint URLs.
 
 Write tools are hidden by their availability check until `enable_mutations: true`,
-and handlers independently enforce this setting. Sending, deleting email and calendar mutations
+and handlers independently enforce this setting. Sending, deleting email or contacts, and calendar mutations
 request approval through Hermes's `pre_tool_call` hook. Hermes's own approval
 policy controls the resulting prompt, denials, session grants and automatic
 approval behavior. Direct calls to Python handlers bypass Hermes's approval
 pipeline and are for trusted testing/code only.
+
+## New workflows
+
+Create a calendar entry after selecting a writable calendar with `jmap_list_calendars`.
+Use local `start` values such as `2026-10-12T10:00:00` and durations such as `PT1H`.
+Omitted timed-event timezones use the configured timezone.
+For an all-day entry, use `all_day: true`, midnight `start`, and a whole-day duration such as `P1D`.
+All-day entries use a floating timezone, represented by null.
+
+The `reminders` array accepts `minutes_before` and an `action` of `display` or `email`.
+An empty array clears explicit reminders. `use_default_alerts: true` selects the calendar defaults instead.
+Calendar applications handle display alerts. Stalwart handles email alerts when its alert service is configured.
+This plugin does not run a background timer or send reminders through Hermes.
+Meeting links belong in `virtual_locations`, for example `{"meeting": {"uri": "https://meet.example/room"}}`.
+Successful event writes return an event ID and a readback.
+If readback fails after a successful write, inspect that ID before retrying.
+
+Preview a calendar attachment with `jmap_preview_calendar_invitation` before selecting its UID and recurrence identity for import.
+Import supports REQUEST/PUBLISH event snapshots and retains the organizer and recurrence data.
+Import does not send scheduling messages, overwrite an existing matching event, or apply cancellation emails.
+Sender reminder settings are excluded from import.
+If mail and calendars use different accounts, preview copies a temporary blob and requires writes enabled.
+Server retention controls uploaded temporary blobs.
+Respond separately with `jmap_respond_to_event`. This tool changes only the matched participant and requests a scheduling response.
+Use a participant identity ID when the default identity is ambiguous.
+
+Upload an explicit file from the machine that runs Hermes with `jmap_upload_attachment`.
+Pass its returned descriptor to draft creation, reply, forward or draft editing.
+Descriptors must belong to the selected mail account. The plugin checks blob bytes and attachment limits.
+Draft attachment edits replace the attachment set when supplied and retain the set when omitted.
+Reply-all excludes the user's discovered aliases and never copies original Bcc recipients.
+Forward drafts attach the original message as `message/rfc822`.
+Neither workflow submits the draft. Sending remains a separate tool.
+
+Folder membership edits retain memberships outside the explicit additions and removals.
+Custom labels map to email keywords. Their display depends on the mail application.
+Contact edits replace only the supplied fields and retain other contact card data.
+Address-book deletion, folder deletion, sharing changes, server-side rules and persistent Hermes notifications are outside this version.
 
 ## Semantics and boundaries
 
@@ -169,7 +284,7 @@ pipeline and are for trusted testing/code only.
   respected. Errors use static messages and safe codes; response bodies, headers,
   credentials and exception URLs are never included in diagnostics or plugin logs.
   HTTP failures include a numeric `http_status` and a fixed `stage` identifier
-  (`session_discovery`, `jmap_api` or `attachment_download`). Redirect failures use
+  (`session_discovery`, `jmap_api`, `attachment_download` or `attachment_upload`). Redirect failures use
   `redirect_refused` and explain that the direct Session URL is required.
   Credential echoes in normalized strings are redacted. Rate limits return a
   bounded numeric retry-after indication without sleeping or retrying.
@@ -196,10 +311,28 @@ privately via the environment:
 JMAP_INTEGRATION=1 python -m unittest tests.test_integration -v
 ```
 
-These live smoke tests only read. Calendar tests skip when unsupported. Optional
-`JMAP_AUTH_TYPE`, `JMAP_MAIL_ACCOUNT_ID` and `JMAP_CALENDAR_ACCOUNT_ID` select test
-authentication/account settings. No integration test sends mail or changes your
-calendar, and no server content is saved as a fixture.
+These smoke tests only read. Unsupported calendar/contact capabilities skip their reads.
+Optional `JMAP_AUTH_TYPE`, `JMAP_MAIL_ACCOUNT_ID`, `JMAP_CALENDAR_ACCOUNT_ID` and
+`JMAP_CONTACTS_ACCOUNT_ID` select test authentication and accounts.
+No server content is saved as a fixture.
+
+Separate write tests require explicit opt-in and isolated test targets:
+
+```sh
+JMAP_WRITE_INTEGRATION=1 python -m unittest tests.test_write_integration.StalwartWriteIntegrationTests -v
+```
+
+Set `JMAP_TEST_CALENDAR_ID`, `JMAP_TEST_ADDRESS_BOOK_ID` or `JMAP_TEST_IDENTITY_ID` for the matching test.
+These tests create unique temporary events, contacts or an unsent draft with a small attachment.
+They delete only the known IDs they created and never send mail or scheduling messages.
+A failed cleanup reports a test failure. Uncertain creation is not retried.
+Uploaded blobs remain subject to server retention.
+
+An RSVP test needs a separate `JMAP_SCHEDULING_INTEGRATION=1` opt-in.
+It also needs `JMAP_TEST_RSVP_EVENT_ID` and `JMAP_TEST_PARTICIPANT_IDENTITY_ID`.
+It tentatively accepts that selected test invitation and requests a scheduling response.
+It does not restore the original RSVP. Use a test invitation and test recipients.
+These direct Python tests bypass Hermes approval hooks.
 
 See [docs/validation.md](docs/validation.md) for the current verification evidence
 and the distinction between mocked tests, Hermes runtime proof and live proof.

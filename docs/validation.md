@@ -1,5 +1,47 @@
 # Validation record
 
+## Version 0.2.0, 2026-10-02
+
+`HERMES_SOURCE=/tmp/hermes-jmap-runtime python -m unittest discover` discovered 120 tests.
+113 passed. Seven live tests skipped because their opt-in values were absent.
+This includes the actual Hermes loader, registry dispatch, configuration and approval tests.
+The Hermes checkout was pinned to `5c08ad68f7ec488057880752f8071cee154a6e60`.
+
+Hermes `doctor_plugin` reported version 0.2.0 with 45 tools and one hook.
+Discovery, manifest parsing, import and registration passed.
+`python -m compileall -q .` and `git diff --check` also passed.
+Python 3.14 ran these tests. The declared minimum remains Python 3.11.
+
+New fixtures cover all-day writes across daylight-saving dates, reminders, default alerts and meeting links.
+They also cover private calendar rights, organizer selection, RSVP identity matching and occurrence patch escaping.
+Successful writes with failed readback retain the created ID and report the readback failure.
+
+Invitation fixtures cover attachment ownership, byte limits, server parsing, cross-account upload and the write gate.
+Import tests cover event selection, duplicate identity detection, recurrence and exclusion of sender reminders.
+Malformed parse results fail explicitly. Cancellation snapshots do not mutate events.
+
+Contact fixtures cover address books, bounded search/get, rights, account selection and state guards.
+Contact updates retain unrelated card fields. UTF-8 address-book names enforce the protocol byte limit.
+Mail fixtures cover threaded reply-all, alias exclusion, Bcc exclusion, original-message forwarding and verified attachments.
+Draft edits retain threading headers and body alternatives.
+Upload tests cover local regular files, size limits, MIME metadata and uncertain outcomes without retries.
+Folder and keyword tests cover rights, state guards and preservation of unrelated memberships and system flags.
+
+Actual Hermes tests load a temporary user installation with writes disabled and enabled.
+They dispatch the status and address-book tools through Hermes's registry.
+Every consequential tool passes the real approval acceptance, denial and unavailable-gate checks.
+
+Live read tests cover mail, calendars, contacts, identities and diagnostics.
+Separate live write tests target explicitly selected test calendars, address books or sending identities.
+They create and clean up temporary events, contacts or an unsent draft with an attachment.
+The RSVP test has a separate scheduling opt-in and requires an explicit test event and participant identity.
+These tests were not run against a live account.
+
+No live compatibility, reminder delivery, mail delivery or remote-machine installation is claimed.
+The remaining sections record the earlier version 0.1.0 checks and HTTP diagnosis.
+
+## Version 0.1.0 history
+
 2026-09-30. No live Stalwart credentials were supplied and no live account was
 modified. Offline fixtures contain only synthetic identities and test secrets.
 

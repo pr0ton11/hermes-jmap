@@ -5,6 +5,7 @@ import tempfile
 
 from . import models
 from .errors import JMAPError, malformed
+from .mail_organization import keyword as validate_keyword
 from .session import MAIL
 from .time_utils import instant
 
@@ -49,6 +50,9 @@ class Mail:
         for source, keyword, positive in (("unread", "$seen", False), ("flagged", "$flagged", True)):
             if source in args:
                 conditions.append({"hasKeyword" if args[source] == positive else "notKeyword": keyword})
+        for source, target in (("keyword", "hasKeyword"), ("not_keyword", "notKeyword")):
+            if source in args:
+                conditions.append({target: validate_keyword(args[source])})
         return {"operator": "AND", "conditions": conditions} if conditions else None
 
     def list_email(self, **args):
